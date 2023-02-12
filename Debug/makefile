@@ -75,8 +75,8 @@ all: main-build
 main-build: SpaceVector.elf secondary-outputs
 
 # Tool invocations
-SpaceVector.elf SpaceVector.map: $(OBJS) $(USER_OBJS) C:\Users\Tonii\STM32CubeIDE\workspace_1.9.0\SpaceVector\STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-g++ -o "SpaceVector.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\Tonii\STM32CubeIDE\workspace_1.9.0\SpaceVector\STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SpaceVector.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
+SpaceVector.elf SpaceVector.map: $(OBJS) $(USER_OBJS) C:\Users\Tonii\Desktop\SeniorProject\STM32\SpaceVector\STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-g++ -o "SpaceVector.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\Tonii\Desktop\SeniorProject\STM32\SpaceVector\STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SpaceVector.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

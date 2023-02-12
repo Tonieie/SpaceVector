@@ -47,9 +47,14 @@ DMA_HandleTypeDef hdma_adc1;
 DMA_HandleTypeDef hdma_adc2;
 DMA_HandleTypeDef hdma_adc3;
 
+SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
+DMA_HandleTypeDef hdma_spi1_rx;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim10;
+
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 const float Vdc = 24;
@@ -128,6 +133,11 @@ typedef struct Stationary{
 
 volatile struct Phase i_ph;
 volatile struct Stationary i_dqs;
+volatile uint8_t adc_done = 0;
+uint8_t READ_ENC_BUFF[2] = {0x7F,0xFE};
+uint8_t enc_data[2];
+float elec_angle = 0.0f;
+volatile uint16_t tmp_angle;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -139,6 +149,9 @@ static void MX_SPI2_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC3_Init(void);
 static void MX_ADC2_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_SPI1_Init(void);
+static void MX_TIM10_Init(void);
 /* USER CODE BEGIN PFP */
 void SPISend(uint8_t addr,uint8_t val1,uint8_t val2);
 uint16_t SPIRead(uint8_t addr);
@@ -146,6 +159,7 @@ void setMosfet();
 int Sector(double Ceta);
 double Convert(double degree);
 void SpaceVector(double V_ref,float Ceta);
+void delay_us(uint16_t us);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -163,8 +177,60 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
 //void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 //{
 //    // Read & Update The ADC Result
+//	static uint8_t buff[9] = {0,0,0,0,0,0,0,'\r','\n'};
+//	static uint8_t counter = 0;
+//	if(hadc->Instance == ADC1)
+//	{
+//		buff[0] = i_ph1  >> 8;
+//		buff[1] = i_ph1;
+//		adc_done |= 1;
+//	}
+//	else if(hadc->Instance == ADC2)
+//	{
+//			buff[2] = i_ph2  >> 8;
+//			buff[3] = i_ph2;
+//			adc_done |= 2;
+//	}
+//	else if(hadc->Instance == ADC3)
+//	{
+//			buff[4] = i_ph3  >> 8;
+//			buff[5] = i_ph3;
+//			adc_done |= 4;
+//	}
 //
+//	if(adc_done == 7)
+//	{
+//		buff[6] = counter;
+//		HAL_UART_Transmit_IT(&huart2, buff, 9);
+//		counter++;
+//		adc_done = 0;
+//	}
 //}
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef * hspi)
+{
+//	tmp_angle = ((enc_data[0] & 0b00111111) << 8) | enc_data[1];
+//	tmp_angle += 1;
+}
+
+//void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef * hspi)
+//{
+//	if(hspi->Instance == SPI1)
+//	{
+//		HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_SET);
+//		delay_us(1);
+//		HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_RESET);
+//		HAL_SPI_TransmitReceive_IT(&hspi1, READ_ENC_BUFF, enc_data, 2);
+//	}
+//}
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef * hspi)
+{
+	if(hspi->Instance == SPI1)
+	{
+		tmp_angle = ((enc_data[0] & 0b00111111) << 8) | enc_data[1];
+	}
+}
 
 void adc2phase(struct Phase *i_ph){
   i_ph->a = -(i_ph1/4095.0f*3.3-1.65)/(CURRENT_SENSE_GAIN*R_SENSE);
@@ -175,6 +241,38 @@ void adc2phase(struct Phase *i_ph){
 void phase2dqs(struct Phase *i_ph, struct Stationary *i_dqs){
 	i_dqs->ds = (2*i_ph->a - i_ph->b - i_ph->c)/3;
 	i_dqs->qs = (i_ph->b - i_ph->c)/sqrt(3);
+}
+
+void delay_us(uint16_t us)
+{
+	htim10.Instance->CNT = 0;
+	while(htim10.Instance->CNT < us);
+}
+
+void startEncRead()
+{
+	HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_SET);
+	delay_us(1);
+	HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_RESET);
+	HAL_SPI_Transmit(&hspi1, READ_ENC_BUFF, 2, 10);
+	HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_SET);
+}
+
+void readEnc()
+{
+	HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_SET);
+	delay_us(1);
+	HAL_GPIO_WritePin(ENC_CS_GPIO_Port, ENC_CS_Pin, GPIO_PIN_RESET);
+	HAL_SPI_TransmitReceive_IT(&hspi1, READ_ENC_BUFF, enc_data, 2);
+}
+
+void getElecAngle()
+{
+	int16_t _tmp = tmp_angle - 2015;
+	while( _tmp < 0)
+		_tmp += 1170;
+
+	elec_angle = (_tmp% 1170) * 360.0f/1170.0f;
 }
 /* USER CODE END 0 */
 
@@ -209,11 +307,15 @@ int main(void)
   MX_TIM1_Init();
   MX_SPI2_Init();
   MX_DMA_Init();
-  MX_ADC1_Init();
   MX_ADC3_Init();
   MX_ADC2_Init();
+  MX_ADC1_Init();
+  MX_USART2_UART_Init();
+  MX_SPI1_Init();
+  MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim1);
+  HAL_TIM_Base_Start(&htim10);
   TIM1->RCR = 1;
 
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -223,24 +325,20 @@ int main(void)
   setMosfet();
   HAL_GPIO_WritePin(DRIVE_EN_GPIO_Port, DRIVE_EN_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(N_BRAKE_GPIO_Port, N_BRAKE_Pin, GPIO_PIN_SET);
-  HAL_Delay(1000);
-  SpaceVector(6, 0);
-  HAL_Delay(1000);
+  HAL_Delay(500);
+
+  startEncRead();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  for(float deg = 0; deg < 360; deg += 0.01)
-	  {
-		  if(HAL_GetTick() - last_time >= 2)
-		  {
-			  last_time = HAL_GetTick();
-			  SpaceVector(4, deg);
-			  adc2phase(&i_ph);
-			  phase2dqs(&i_ph, &i_dqs);
-		  }
+	  for(float angle = 0.0f; angle < 360; angle +=1.0f){
+		  readEnc();
+		  getElecAngle();
+		  SpaceVector(2.5f, angle);
+		  delay_us(10);
 	  }
     /* USER CODE END WHILE */
 
@@ -460,6 +558,44 @@ static void MX_ADC3_Init(void)
 }
 
 /**
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI1_Init(void)
+{
+
+  /* USER CODE BEGIN SPI1_Init 0 */
+
+  /* USER CODE END SPI1_Init 0 */
+
+  /* USER CODE BEGIN SPI1_Init 1 */
+
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI1_Init 2 */
+
+  /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
   * @brief SPI2 Initialization Function
   * @param None
   * @retval None
@@ -580,6 +716,84 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM10 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM10_Init(void)
+{
+
+  /* USER CODE BEGIN TIM10_Init 0 */
+
+  /* USER CODE END TIM10_Init 0 */
+
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM10_Init 1 */
+
+  /* USER CODE END TIM10_Init 1 */
+  htim10.Instance = TIM10;
+  htim10.Init.Prescaler = 180-1;
+  htim10.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim10.Init.Period = 65535;
+  htim10.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim10.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim10) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_OC_Init(&htim10) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_OC_ConfigChannel(&htim10, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM10_Init 2 */
+
+  /* USER CODE END TIM10_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -598,6 +812,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
+  /* DMA2_Stream4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 
 }
 
@@ -617,10 +834,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, CS_Pin|GPIO_PIN_8|xx_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, CS_Pin|GPIO_PIN_8|ENC_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, DRIVE_EN_Pin|N_BRAKE_Pin|IN_LX_Pin, GPIO_PIN_RESET);
@@ -631,23 +845,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : USART_TX_Pin USART_RX_Pin */
-  GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : CS_Pin xx_Pin */
-  GPIO_InitStruct.Pin = CS_Pin|xx_Pin;
+  /*Configure GPIO pins : CS_Pin ENC_CS_Pin */
+  GPIO_InitStruct.Pin = CS_Pin|ENC_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
