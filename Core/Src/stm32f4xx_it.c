@@ -61,7 +61,6 @@ extern DMA_HandleTypeDef hdma_adc3;
 extern DMA_HandleTypeDef hdma_spi1_rx;
 extern SPI_HandleTypeDef hspi1;
 extern TIM_HandleTypeDef htim1;
-extern TIM_HandleTypeDef htim10;
 extern UART_HandleTypeDef huart2;
 /* USER CODE BEGIN EV */
 
@@ -214,9 +213,16 @@ void TIM1_UP_TIM10_IRQHandler(void)
 
   /* USER CODE END TIM1_UP_TIM10_IRQn 0 */
   HAL_TIM_IRQHandler(&htim1);
-  HAL_TIM_IRQHandler(&htim10);
   /* USER CODE BEGIN TIM1_UP_TIM10_IRQn 1 */
-
+  Iabc.a = -(i_ph1-adc_offset[0])*0.00100708f;
+  Iabc.b = -(i_ph2-adc_offset[1])*0.00100708f;
+  Iabc.c = -(i_ph3-adc_offset[2])*0.00100708f;
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&i_ph1, 1);
+  HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&i_ph2, 1);
+  HAL_ADC_Start_DMA(&hadc3, (uint32_t *)&i_ph3, 1);
+  TIM1->CCR1 = Va*2598;
+  TIM1->CCR2 = Vb*2598;
+  TIM1->CCR3 = Vc*2598;
   /* USER CODE END TIM1_UP_TIM10_IRQn 1 */
 }
 

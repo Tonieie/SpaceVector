@@ -52,7 +52,7 @@ SPI_HandleTypeDef hspi2;
 DMA_HandleTypeDef hdma_spi1_rx;
 
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim10;
+TIM_HandleTypeDef htim6;
 
 UART_HandleTypeDef huart2;
 
@@ -62,69 +62,6 @@ double Va,Vb,Vc = 0.0f;
 uint16_t k = 0;
 uint32_t last_time = 0;
 
-#define FAULT_ST_AddRead  0x00
-#define FUNCT_ST_AddRead  0x03
-
-#define FAULT_CLR_AddWrite  0x90
-#define FAULT_CLR_HValue  0b00000000
-#define FAULT_CLR_LValue  0b00000000
-
-#define SUPPLY_CFG_AddWrite  0x91
-#define SUPPLY_CFG_HValue  0b01101000
-#define SUPPLY_CFG_LValue  0b00000010
-
-#define PWM_CFG_AddWrite  0x93
-#define PWM_CFG_HValue  0b00000000
-#define PWM_CFG_LValue  0b00000001
-
-#define SENSOR_CFG_AddWrite  0x94
-#define SENSOR_CFG_HValue  0b00000000
-#define SENSOR_CFG_LValue  0b00100001
-
-#define IDRIVE_CFG_AddWrite  0x97
-#define IDRIVE_CFG_HValue  0b10111011
-#define IDRIVE_CFG_LValue  0b10111011
-
-#define IDRIVE_PRE_CFG_AddWrite  0x98
-#define IDRIVE_PRE_CFG_HValue  0b00000000
-#define IDRIVE_PRE_CFG_LValue  0b10111011
-
-#define TDRIVE_SRC_CFG_AddWrite  0x99
-#define TDRIVE_SRC_CFG_HValue  0b00001001
-#define TDRIVE_SRC_CFG_LValue  0b00000101
-
-#define TDRIVE_SINK_CFG_AddWrite  0x9A
-#define TDRIVE_SINK_CFG_HValue  0b00001101
-#define TDRIVE_SINK_CFG_LValue  0b00001101
-
-#define DT_CFG_AddWrite  0x9B
-#define DT_CFG_HValue  0b00001100
-#define DT_CFG_LValue  0b00001010
-
-#define CSAMP_CFG_AddWrite  0x9D
-#define CSAMP_CFG_HValue  0b11000000
-#define CSAMP_CFG_LValue  0b01110011//4
-
-#define CSAMP2_CFG_AddWrite  0x9E
-#define CSAMP2_CFG_HValue  0b00101000
-#define CSAMP2_CFG_LValue  0b00000000
-
-#define CP_CFG_AddWrite 0x9C
-#define CP_CFG_HValue  0b00000000
-#define CP_CFG_LValue  0b00000001
-
-#define CURRENT_SENSE_GAIN 16.0f
-#define R_SENSE 0.005f
-
-volatile uint16_t i_ph1 = 0;
-volatile uint16_t i_ph2 = 0;
-volatile uint16_t i_ph3 = 0;
-
-typedef struct Phase {
-  float a;
-  float b;
-  float c;
-}Phase;
 
 typedef struct Stationary{
 	float ds;
@@ -147,7 +84,12 @@ Phase adc = {0,0,0};
 Phase Iabc = {0,0,0};
 Stationary Idqs = {0,0};
 Rotating Idqr = {0,0};
-float adc_offset[3] = {0,0,0};
+uint16_t adc_offset[3] = {0,0,0};
+
+uint16_t i_ph1 = 0;
+uint16_t i_ph2 = 0;
+uint16_t i_ph3 = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -161,7 +103,7 @@ static void MX_ADC3_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_SPI1_Init(void);
-static void MX_TIM10_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 void SPISend(uint8_t addr,uint8_t val1,uint8_t val2);
 uint16_t SPIRead(uint8_t addr);
@@ -174,19 +116,17 @@ void delay_us(uint16_t us);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
-	if(htim->Instance == TIM1){
-		Iabc.a = -((i_ph1-adc_offset[0])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
-		Iabc.b = -((i_ph2-adc_offset[1])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
-		Iabc.c = -((i_ph3-adc_offset[2])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
-		HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&i_ph1, 1);
-		HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&i_ph2, 1);
-		HAL_ADC_Start_DMA(&hadc3, (uint32_t *)&i_ph3, 1);
-		TIM1->CCR1 = Va*2598;
-		TIM1->CCR2 = Vb*2598;
-		TIM1->CCR3 = Vc*2598;
-	}
-}
+//void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+//	Iabc.a = -((i_ph1-adc_offset[0])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+//	Iabc.b = -((i_ph2-adc_offset[1])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+//	Iabc.c = -((i_ph3-adc_offset[2])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+//	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&i_ph1, 1);
+//	HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&i_ph2, 1);
+//	HAL_ADC_Start_DMA(&hadc3, (uint32_t *)&i_ph3, 1);
+//	TIM1->CCR1 = Va*2598;
+//	TIM1->CCR2 = Vb*2598;
+//	TIM1->CCR3 = Vc*2598;
+//}
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
 //	if(hadc->Instance == ADC1)
@@ -262,9 +202,9 @@ void phase2dqs(struct Phase *i_ph, struct Stationary *i_dqs){
 }
 
 void dqs2dqr(Stationary *i_dqs, Rotating *i_dqr, float theta){
-	theta *= M_PI/180.0f;
-	i_dqr->dr =  i_dqs->ds*cos(theta) + i_dqs->qs*sin(theta);
-	i_dqr->qr = (-i_dqs->ds*sin(theta) )+ i_dqs->qs*cos(theta);
+	theta *= (M_PI/180.0f);
+	i_dqr->dr =  (i_dqs->ds*cos(theta)) + (i_dqs->qs*sin(theta));
+	i_dqr->qr = (-i_dqs->ds*sin(theta)) + (i_dqs->qs*cos(theta));
 }
 
 void calibrateADC(){
@@ -285,15 +225,15 @@ void calibrateADC(){
 		HAL_ADC_Stop(&hadc3);
 //		delay_us(10);
 	}
-	adc_offset[0] = tmp[0]/100.0f;
-	adc_offset[1] = tmp[1]/100.0f;
-	adc_offset[2] = tmp[2]/100.0f;
+	adc_offset[0] = tmp[0]/100;
+	adc_offset[1] = tmp[1]/100;
+	adc_offset[2] = tmp[2]/100;
 }
 
 void delay_us(uint16_t us)
 {
-	htim10.Instance->CNT = 0;
-	while(htim10.Instance->CNT < us);
+	htim6.Instance->CNT = 0;
+	while(htim6.Instance->CNT < us);
 }
 
 void startEncRead()
@@ -354,12 +294,12 @@ int main(void)
   MX_TIM1_Init();
   MX_SPI2_Init();
   MX_DMA_Init();
-  MX_ADC1_Init();
   MX_ADC3_Init();
   MX_ADC2_Init();
+  MX_ADC1_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
-  MX_TIM10_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -369,14 +309,14 @@ int main(void)
   HAL_Delay(500);
   calibrateADC();
   HAL_TIM_Base_Start_IT(&htim1);
-  HAL_TIM_Base_Start(&htim10);
+  HAL_TIM_Base_Start(&htim6);
   TIM1->RCR = 1;
 
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   startEncRead();
-
+  uint16_t round = 0;
   uint32_t last_time = 0;
   /* USER CODE END 2 */
 
@@ -384,18 +324,26 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  for(float angle = 0.0f; angle < 360; angle +=0.005f){
-		  if(HAL_GetTick() - last_time >= 2){
-			  last_time = HAL_GetTick();
-			  readEnc();
-			  getElecAngle();
-			  SpaceVector(4.0f, angle);
-			  phase2dqs(&Iabc,&Idqs);
-			  //delay_us(20);
-			  dqs2dqr(&Idqs,&Idqr,elec_angle);
+	  if(round < 1)
+	  {
+		  for(float angle = 0.0f; angle < 360; angle +=0.005f){
+			  if(HAL_GetTick() - last_time >= 2){
+				  last_time = HAL_GetTick();
+				  readEnc();
+				  getElecAngle();
+				  SpaceVector(4.0f, 0);
+	//			  phase2dqs(&Iabc,&Idqs);
+	//			  delay_us(20);
+	//			  dqs2dqr(&Idqs,&Idqr,angle);
+			  }
 		  }
-
+		  round++;
 	  }
+	  readEnc();
+	  getElecAngle();
+	  delay_us(20);
+
+
 
     /* USER CODE END WHILE */
 
@@ -773,47 +721,40 @@ static void MX_TIM1_Init(void)
 }
 
 /**
-  * @brief TIM10 Initialization Function
+  * @brief TIM6 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_TIM10_Init(void)
+static void MX_TIM6_Init(void)
 {
 
-  /* USER CODE BEGIN TIM10_Init 0 */
+  /* USER CODE BEGIN TIM6_Init 0 */
 
-  /* USER CODE END TIM10_Init 0 */
+  /* USER CODE END TIM6_Init 0 */
 
-  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM10_Init 1 */
+  /* USER CODE BEGIN TIM6_Init 1 */
 
-  /* USER CODE END TIM10_Init 1 */
-  htim10.Instance = TIM10;
-  htim10.Init.Prescaler = 180-1;
-  htim10.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim10.Init.Period = 65535;
-  htim10.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim10.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim10) != HAL_OK)
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 180-1;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 65535;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
     Error_Handler();
   }
-  if (HAL_TIM_OC_Init(&htim10) != HAL_OK)
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim10, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM10_Init 2 */
+  /* USER CODE BEGIN TIM6_Init 2 */
 
-  /* USER CODE END TIM10_Init 2 */
+  /* USER CODE END TIM6_Init 2 */
 
 }
 
