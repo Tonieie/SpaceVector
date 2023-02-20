@@ -103,7 +103,7 @@ uint32_t last_time = 0;
 
 #define CSAMP_CFG_AddWrite  0x9D
 #define CSAMP_CFG_HValue  0b11000000
-#define CSAMP_CFG_LValue  0b01110000//4
+#define CSAMP_CFG_LValue  0b01110011//4
 
 #define CSAMP2_CFG_AddWrite  0x9E
 #define CSAMP2_CFG_HValue  0b00101000
@@ -113,7 +113,7 @@ uint32_t last_time = 0;
 #define CP_CFG_HValue  0b00000000
 #define CP_CFG_LValue  0b00000001
 
-#define CURRENT_SENSE_GAIN 4.0f
+#define CURRENT_SENSE_GAIN 16.0f
 #define R_SENSE 0.005f
 
 volatile uint16_t i_ph1 = 0;
@@ -124,20 +124,30 @@ typedef struct Phase {
   float a;
   float b;
   float c;
-};
+}Phase;
 
 typedef struct Stationary{
 	float ds;
 	float qs;
-};
+}Stationary;
 
-volatile struct Phase i_ph;
+typedef struct Rotating{
+	float dr;
+	float qr;
+}Rotating;
+
+
 volatile struct Stationary i_dqs;
 volatile uint8_t adc_done = 0;
 uint8_t READ_ENC_BUFF[2] = {0x7F,0xFE};
 uint8_t enc_data[2];
 float elec_angle = 0.0f;
 volatile uint16_t tmp_angle;
+Phase adc = {0,0,0};
+Phase Iabc = {0,0,0};
+Stationary Idqs = {0,0};
+Rotating Idqr = {0,0};
+float adc_offset[3] = {0,0,0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -165,13 +175,26 @@ void delay_us(uint16_t us);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+	if(htim->Instance == TIM1){
+		Iabc.a = -((i_ph1-adc_offset[0])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+		Iabc.b = -((i_ph2-adc_offset[1])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+		Iabc.c = -((i_ph3-adc_offset[2])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&i_ph1, 1);
+		HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&i_ph2, 1);
+		HAL_ADC_Start_DMA(&hadc3, (uint32_t *)&i_ph3, 1);
+		TIM1->CCR1 = Va*2598;
+		TIM1->CCR2 = Vb*2598;
+		TIM1->CCR3 = Vc*2598;
+	}
+}
 
-	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)&i_ph1, 1);
-	HAL_ADC_Start_DMA(&hadc2, (uint32_t *)&i_ph2, 1);
-	HAL_ADC_Start_DMA(&hadc3, (uint32_t *)&i_ph3, 1);
-	TIM1->CCR1 = Va*2598;
-	TIM1->CCR2 = Vb*2598;
-	TIM1->CCR3 = Vc*2598;
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
+//	if(hadc->Instance == ADC1)
+//	  Iabc.a = -((i_ph1-adc_offset[0])/4096.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+//	else if(hadc->Instance == ADC2)
+//	  Iabc.b = -((i_ph2-adc_offset[1])/4095.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
+//	else if(hadc->Instance == ADC3)
+//	  Iabc.c = -((i_ph3-adc_offset[2])/4095.0f*3.3)/(CURRENT_SENSE_GAIN*R_SENSE);
 }
 
 //void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
@@ -232,15 +255,39 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef * hspi)
 	}
 }
 
-void adc2phase(struct Phase *i_ph){
-  i_ph->a = -(i_ph1/4095.0f*3.3-1.65)/(CURRENT_SENSE_GAIN*R_SENSE);
-  i_ph->b = -(i_ph2/4095.0f*3.3-1.65)/(CURRENT_SENSE_GAIN*R_SENSE);
-  i_ph->c = -(i_ph3/4095.0f*3.3-1.65)/(CURRENT_SENSE_GAIN*R_SENSE);
-}
 
 void phase2dqs(struct Phase *i_ph, struct Stationary *i_dqs){
 	i_dqs->ds = (2*i_ph->a - i_ph->b - i_ph->c)/3;
 	i_dqs->qs = (i_ph->b - i_ph->c)/sqrt(3);
+}
+
+void dqs2dqr(Stationary *i_dqs, Rotating *i_dqr, float theta){
+	theta *= M_PI/180.0f;
+	i_dqr->dr =  i_dqs->ds*cos(theta) + i_dqs->qs*sin(theta);
+	i_dqr->qr = (-i_dqs->ds*sin(theta) )+ i_dqs->qs*cos(theta);
+}
+
+void calibrateADC(){
+	uint32_t tmp[3] = {0,0,0};
+	SpaceVector(0.0, 0);
+	for(int i=0;i<100;i++){
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_PollForConversion(&hadc1, 1);
+		tmp[0] += HAL_ADC_GetValue(&hadc1);
+		HAL_ADC_Stop(&hadc1);
+		HAL_ADC_Start(&hadc2);
+		HAL_ADC_PollForConversion(&hadc2, 1);
+		tmp[1] += HAL_ADC_GetValue(&hadc2);
+		HAL_ADC_Stop(&hadc2);
+		HAL_ADC_Start(&hadc3);
+		HAL_ADC_PollForConversion(&hadc3, 1);
+		tmp[2] += HAL_ADC_GetValue(&hadc3);
+		HAL_ADC_Stop(&hadc3);
+//		delay_us(10);
+	}
+	adc_offset[0] = tmp[0]/100.0f;
+	adc_offset[1] = tmp[1]/100.0f;
+	adc_offset[2] = tmp[2]/100.0f;
 }
 
 void delay_us(uint16_t us)
@@ -307,13 +354,20 @@ int main(void)
   MX_TIM1_Init();
   MX_SPI2_Init();
   MX_DMA_Init();
+  MX_ADC1_Init();
   MX_ADC3_Init();
   MX_ADC2_Init();
-  MX_ADC1_Init();
   MX_USART2_UART_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
   /* USER CODE BEGIN 2 */
+
+
+  setMosfet();
+  HAL_GPIO_WritePin(DRIVE_EN_GPIO_Port, DRIVE_EN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(N_BRAKE_GPIO_Port, N_BRAKE_Pin, GPIO_PIN_SET);
+  HAL_Delay(500);
+  calibrateADC();
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_TIM_Base_Start(&htim10);
   TIM1->RCR = 1;
@@ -321,25 +375,28 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-
-  setMosfet();
-  HAL_GPIO_WritePin(DRIVE_EN_GPIO_Port, DRIVE_EN_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(N_BRAKE_GPIO_Port, N_BRAKE_Pin, GPIO_PIN_SET);
-  HAL_Delay(500);
-
   startEncRead();
+
+  uint32_t last_time = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  for(float angle = 0.0f; angle < 360; angle +=1.0f){
-		  readEnc();
-		  getElecAngle();
-		  SpaceVector(2.5f, angle);
-		  delay_us(10);
+	  for(float angle = 0.0f; angle < 360; angle +=0.005f){
+		  if(HAL_GetTick() - last_time >= 2){
+			  last_time = HAL_GetTick();
+			  readEnc();
+			  getElecAngle();
+			  SpaceVector(4.0f, angle);
+			  phase2dqs(&Iabc,&Idqs);
+			  //delay_us(20);
+			  dqs2dqr(&Idqs,&Idqr,elec_angle);
+		  }
+
 	  }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
